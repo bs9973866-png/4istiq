@@ -53,7 +53,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
             placeInCircle(p);
             p.setInvulnerable(true);
             frozen.add(p.getUniqueId());
-            announce("Подключился " + p.getName() + " (" + onlineBots() + "/" + botNames().size() + ")");
+            announce("Подключился " + p.getName() + " (" + onlineBots() + "/" + requiredAgents() + ")");
             if (countdownTask != null && onlineBots() < requiredAgents()) {
                 stopCountdown(false);
                 announce("Недостаточно агентов. Отсчёт будет начат заново.");
@@ -112,11 +112,11 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
     private void announce(String message) { Bukkit.broadcastMessage("§d[AI SMP] §f" + message); }
 
     private void beginCountdown() {
-        if (onlineBots() < botNames().size()) return;
+        if (onlineBots() < requiredAgents()) return;
         secondsLeft = Math.max(5, getConfig().getInt("countdown-seconds", 60));
         announce("Нужное число агентов на месте! До начала симуляции: " + secondsLeft + " секунд.");
         countdownTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            if (onlineBots() < botNames().size()) {
+            if (onlineBots() < requiredAgents()) {
                 stopCountdown(false);
                 announce("Не все агенты подключены. Отсчёт остановлен.");
                 return;
@@ -161,7 +161,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
                 sender.sendMessage("§eСимуляция уже запущена или идёт отсчёт.");
                 return true;
             }
-            if (onlineBots() < botNames().size()) {
+            if (onlineBots() < requiredAgents()) {
                 sender.sendMessage("§cНужно подключить всех агентов: " + onlineBots() + "/" + botNames().size());
                 return true;
             }
