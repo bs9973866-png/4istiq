@@ -60,7 +60,12 @@ if (Test-Path $serverJar) {
 }
 if (-not (Test-Path $serverJar)) {
   Write-Host "Downloading $downloadName ..."
-  try {`n  Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $serverJar -TimeoutSec 180`n} catch {`n  if (Test-Path $serverJar) { Remove-Item $serverJar -Force }`n  throw "Paper download failed. Run the installer again. Details: $($_.Exception.Message)"`n}
+  try {
+    Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $serverJar -TimeoutSec 180
+  } catch {
+    if (Test-Path $serverJar) { Remove-Item $serverJar -Force }
+    throw "Paper download failed. Run the installer again. Details: $($_.Exception.Message)"
+  }
   if ($expectedHash) {
     $actualHash = (Get-FileHash -Path $serverJar -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -ne $expectedHash.ToLowerInvariant()) {
