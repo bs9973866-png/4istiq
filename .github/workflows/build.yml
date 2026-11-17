@@ -1,0 +1,35 @@
+name: Build AI SMP
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check AI runtime syntax
+        working-directory: agent-runtime
+        run: |
+          node --check index.js
+          node --check ollama-brain.js
+          npm run validate
+      - name: Install AI runtime dependencies
+        working-directory: agent-runtime
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Build Paper plugin
+        run: mvn --batch-mode clean package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-smp-plugin
+          path: target/ai-smp-1.0.0.jar
