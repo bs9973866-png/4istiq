@@ -96,11 +96,16 @@ function makeAgent(profile, state) {
 
   bot.once('spawn', () => {
     if (state.bot !== bot) return
+    // Mineflayer-pathfinder performs the actual jump timing. The AI only
+    // chooses destinations; this movement layer handles terrain and jumps.
     const movement = new Movements(bot)
     movement.canDig = true
+    movement.allowParkour = true
+    movement.allowSprinting = true
     movement.allow1by1towers = false
     bot.pathfinder.setMovements(movement)
-    console.log('[ONLINE] ' + profile.name + ' spawned at ' + JSON.stringify(safePosition(bot)))
+    state.navigationReady = true
+    console.log('[ONLINE] ' + profile.name + ' spawned at ' + JSON.stringify(safePosition(bot)) + ' (pathfinder ready; parkour+jump enabled)')
     if (state.started) runAgent(bot, profile, state).catch(err => console.error('[AI]', profile.name, err.message))
   })
 
@@ -135,6 +140,8 @@ function makeAgent(profile, state) {
     if (state.bot !== bot) return
     state.bot = null
     state.busy = false
+    state.navigationReady = false
+    state.navigationTarget = null
     if (!shuttingDown) {
       state.retry = (state.retry || 0) + 1
       const delay = Math.min(30000, 3000 * state.retry)
@@ -145,9 +152,33 @@ function makeAgent(profile, state) {
 }
 
 async function moveNear(bot, position, range = 3) {
-  if (!bot.entity || !bot.pathfinder) return false
-  await bot.pathfinder.goto(new goals.GoalNear(position.x, position.y, position.z, range))
-  return true
+  const stateEntry = agents.get(bot.username)
+  const state = stateEntry?.state
+  if (!bot.entity || !bot.pathfinder || !state?.navigationReady) return false
+
+  const destination = new goals.GoalNear(
+    Math.floor(position.x), Math.floor(position.y), Math.floor(position.z), range
+  )
+  state.navigationTarget = { x: Math.floor(position.x), y: Math.floor(position.y), z: Math.floor(position.z) }
+
+  // A blocked/unreachable goal must not freeze an agent's entire decision loop.
+  let timeout
+  try {
+    await Promise.race([
+      bot.pathfinder.goto(destination),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('navigation timeout after 25s')), 25000)
+      })
+    ])
+    return true
+  } catch (error) {
+    bot.pathfinder.setGoal(null)
+    console.log('[NAV] ' + bot.username + ': ' + error.message)
+    return false
+  } finally {
+    clearTimeout(timeout)
+    state.navigationTarget = null
+  }
 }
 
 async function gatherWood(bot, profile) {
@@ -354,7 +385,7 @@ async function main() {
   if (profiles.length !== 19) throw new Error('bots.json must contain exactly 19 agents')
   console.log('[BOOT] ' + profiles.length + ' agents -> ' + HOST + ':' + PORT + ' (Minecraft ' + VERSION + ')')
   for (const profile of profiles) {
-    const state = { bot: null, started: false, busy: false, retry: 0, lastChat: 0 }
+    const state = { bot: null, started: false, busy: false, retry: 0, lastChat: 0, navigationReady: false, navigationTarget: null }
     agents.set(profile.name, { profile, state })
     makeAgent(profile, state)
     await wait(1200)
