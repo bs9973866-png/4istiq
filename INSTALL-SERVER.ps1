@@ -15,18 +15,40 @@ if ($javaMajor -lt 25) { Write-Host "Paper 26.2 needs Java 25+. Detected Java $j
 Write-Host "Java $javaMajor detected." -ForegroundColor Green
 
 # PaperMC retired its old v2 API. Use the supported Fill v3 endpoint.
+# Windows PowerShell 5.1 may otherwise negotiate an obsolete TLS version.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $headers = @{
-  "User-Agent" = "4ISTIQ-Server-Installer/1.0 (https://github.com/bs9973866-png/4istiq)"
+  "User-Agent" = "4ISTIQ-Server-Installer/1.1 (https://github.com/bs9973866-png/4istiq)"
   "Accept" = "application/json"
 }
 $api = "https://fill.papermc.io/v3/projects/paper/versions/$Version/builds"
 Write-Host "Checking stable Paper $Version builds..."
-$builds = Invoke-RestMethod -Uri $api -Headers $headers -Method Get
-if ($builds.ok -eq $false) { throw "Paper API error: $($builds.message)" }
-$buildInfo = $builds | Where-Object { $_.channel -eq "STABLE" } | Select-Object -First 1
-if (-not $buildInfo) { throw "No stable Paper builds found for Minecraft $Version." }
+try {
+  $response = Invoke-RestMethod -Uri $api -Headers $headers -Method Get -TimeoutSec 30
+} catch {
+  throw "Could not contact the PaperMC Fill API. Check your internet connection and try again. Details: $($_.Exception.Message)"
+}
+if ($null -ne $response.ok -and $response.ok -eq $false) {
+  throw "PaperMC API error: $($response.message)"
+}
+
+# The v3 endpoint returns a JSON array. Wrap it in @() so PowerShell 5.1
+# handles both one-result and many-result responses consistently.
+$builds = @($response)
+$buildInfo = $null
+foreach ($candidate in $builds) {
+  if ($candidate.channel -eq "STABLE") {
+    $buildInfo = $candidate
+    break
+  }
+}
+if (-not $buildInfo) {
+  throw "PaperMC returned no stable builds for Minecraft $Version. Check whether this version has a stable Paper release."
+}
 $download = $buildInfo.downloads.'server:default'
-if (-not $download.url -or -not $download.name) { throw "Paper API did not return a server download URL." }
+if (-not $download -or -not $download.url -or -not $download.name) {
+  throw "PaperMC returned a build without the server:default download. Please retry later."
+}
 
 $downloadName = $download.name
 $downloadUrl = $download.url
@@ -38,7 +60,7 @@ if (Test-Path $serverJar) {
 }
 if (-not (Test-Path $serverJar)) {
   Write-Host "Downloading $downloadName ..."
-  Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $serverJar
+  try {`n  Invoke-WebRequest -Uri $downloadUrl -Headers $headers -OutFile $serverJar -TimeoutSec 180`n} catch {`n  if (Test-Path $serverJar) { Remove-Item $serverJar -Force }`n  throw "Paper download failed. Run the installer again. Details: $($_.Exception.Message)"`n}
   if ($expectedHash) {
     $actualHash = (Get-FileHash -Path $serverJar -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -ne $expectedHash.ToLowerInvariant()) {
