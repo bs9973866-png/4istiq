@@ -18,6 +18,7 @@ bots:
   - AI_Mayak
   - AI_Sever
   - AI_Iskra
+minimum-agents: 1
 countdown-seconds: 60
 circle-radius: 5.0
 spawn-world: ""
