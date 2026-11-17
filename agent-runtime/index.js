@@ -7,7 +7,7 @@ const requestedBot = (process.env.AI_BOT || 'ALL').trim()
 const profiles = requestedBot.toUpperCase() === 'ALL'
   ? allProfiles
   : allProfiles.filter(profile => profile.name.toLowerCase() === requestedBot.toLowerCase())
-const { generateDecision } = require('./ollama-brain')
+const { generateDecision, generateChatReply } = require('./ollama-brain')
 
 const HOST = process.env.MC_HOST || '127.0.0.1'
 const PORT = Number(process.env.MC_PORT || 25565)
@@ -172,12 +172,37 @@ function makeAgent(profile, state) {
   })
 
   bot.on('chat', (username, message) => {
-    if (username === bot.username || !profiles.some(p => p.name === username)) return
+    if (username === bot.username) return
     const other = profiles.find(p => p.name === username)
-    const sameFaction = other && other.faction === profile.faction
-    const diplomatic = /союз|друж|помощ|вместе|обмен|сотруднич/.test(message.toLowerCase())
-    recordRelationship(profile, username, diplomatic ? 2 : sameFaction ? 1 : 0.25, message)
-    remember(profile.name, 'Персонаж ' + username + ' сказал: ' + message)
+    if (other) {
+      const sameFaction = other.faction === profile.faction
+      const diplomatic = /союз|друж|помощ|вместе|обмен|сотруднич/.test(message.toLowerCase())
+      recordRelationship(profile, username, diplomatic ? 2 : sameFaction ? 1 : 0.25, message)
+      remember(profile.name, 'Персонаж ' + username + ' сказал: ' + message)
+      return
+    }
+    const lower = message.toLowerCase().trim()
+    const names = [bot.username.toLowerCase()]
+    if (profile.name === 'AI_Vega') names.push('вега')
+    const matched = names.find(name => lower.startsWith(name + ' ') || lower.startsWith(name + ',') || lower.startsWith(name + ':') || lower.startsWith('@' + name + ' '))
+    if (!matched) return
+    const playerMessage = lower.startsWith('@' + matched + ' ') ? message.trim().slice(matched.length + 2).trim() : message.trim().slice(matched.length).replace(/^[ ,:!]+/, '').trim()
+    if (!playerMessage || state.chatBusy || Date.now() - (state.lastChatReply || 0) < 2500) return
+    state.chatBusy = true
+    state.lastChatReply = Date.now()
+    const history = memory[profile.name].chatHistory ||= []
+    history.push({ role: 'player', name: username, text: playerMessage.slice(0, 300) })
+    if (history.length > 20) history.splice(0, history.length - 20)
+    generateChatReply(profile, memory[profile.name], username, playerMessage)
+      .then(reply => {
+        if (!reply || state.bot !== bot || !bot.entity) return
+        history.push({ role: 'agent', text: reply })
+        if (history.length > 20) history.splice(0, history.length - 20)
+        saveMemory()
+        say(bot, profile.name + ': ' + reply)
+      })
+      .catch(error => console.log('[CHAT] ' + profile.name + ': ' + error.message))
+      .finally(() => { state.chatBusy = false })
   })
 
   bot.on('kicked', reason => console.log('[KICK] ' + profile.name + ': ' + reason))
