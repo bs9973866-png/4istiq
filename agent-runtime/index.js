@@ -225,7 +225,10 @@ async function explore(bot, profile) {
         say(bot, 'Я исследую местность: ' + biome + '.')
       }
     }
-  } catch {}
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function buildStarterCamp(bot, profile) {
