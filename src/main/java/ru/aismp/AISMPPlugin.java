@@ -147,7 +147,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String action = args.length == 0 ? "status" : args[0].toLowerCase();
         if (action.equals("status")) {
-            sender.sendMessage("§dAI SMP §f| агенты: " + onlineBots() + "/" + botNames().size()
+            sender.sendMessage("§dAI SMP §f| агенты: " + onlineBots() + "/" + requiredAgents()
                     + " | " + (running ? "симуляция идёт"
                     : countdownTask != null ? "старт через " + secondsLeft + "с" : "ожидание"));
             return true;
@@ -162,7 +162,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
                 return true;
             }
             if (onlineBots() < requiredAgents()) {
-                sender.sendMessage("§cНужно подключить всех агентов: " + onlineBots() + "/" + botNames().size());
+                sender.sendMessage("§cНужно подключить агентов: " + onlineBots() + "/" + requiredAgents());
                 return true;
             }
             for (Player p : Bukkit.getOnlinePlayers()) if (isBot(p)) {
