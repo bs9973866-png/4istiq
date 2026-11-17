@@ -187,8 +187,15 @@ async function gatherWood(bot, profile) {
   if (!ids.length) return 0
   let collected = 0
   for (let i = 0; i < 3 && bot.entity; i++) {
-    const target = bot.findBlock({ matching: ids, maxDistance: 32 })
-    if (!target) break
+    const target = bot.findBlock({ matching: ids, maxDistance: 48 })
+    if (!target) {
+      // Move to a nearby search point instead of falling back into an
+      // endless generic explore/chat loop when no tree is currently loaded nearby.
+      const origin = bot.entity.position
+      const searchPoint = origin.offset(rand(-24, 24), 0, rand(-24, 24))
+      await moveNear(bot, searchPoint, 5)
+      break
+    }
     try {
       const reached = await moveNear(bot, target.position, 2)
       if (!reached) continue
@@ -314,41 +321,45 @@ function applyTaskDirector(profile, agentMemory, observation, decision) {
   const logs = observation.inventory
     .filter(item => item.name.endsWith('_log'))
     .reduce((sum, item) => sum + item.count, 0)
-  const previous = agentMemory.lastAction || ''
-  const streak = previous === 'explore' ? (agentMemory.actionStreak || 0) : 0
   let action = decision?.action || 'explore'
   let reason = decision?.reason || ''
 
-  // Give every role a concrete job. The model may suggest exploring, but it
-  // cannot keep an agent in that loop indefinitely.
-  if (profile.role === 'gatherer' && observation.nearbyLogs > 0 && logs < 8) {
-    action = 'gather_wood'
-    reason = 'Рабочая задача собирателя: рядом есть древесина'
-  } else if (profile.role === 'builder' && logs >= 2) {
-    action = 'build_camp'
-    reason = 'Есть материалы — пора обустраивать лагерь'
-  } else if (action === 'explore' && streak >= 1) {
-    if (profile.role === 'gatherer') {
-      action = 'gather_wood'
-      reason = 'Смена повторяющегося исследования на сбор ресурсов'
-    } else if (profile.role === 'builder') {
-      action = logs >= 2 ? 'build_camp' : 'gather_wood'
-      reason = 'Смена исследования на работу строителя'
-    } else if (!agentMemory.home) {
-      action = 'claim_home'
-      reason = 'Разведчик уже осмотрел окрестности — выбирает место для дома'
-    } else if (observation.nearbyAgents.length) {
-      action = 'visit_agent'
-      reason = 'Пора встретиться с соседями и обсудить поселение'
+  // Ollama may suggest exploring forever. Role assignments are authoritative:
+  // scouts select a home once, then meet allies or help gather resources;
+  // gatherers collect wood; builders gather until they have enough to build.
+  if (action === 'explore') {
+    if (profile.role === 'scout') {
+      if (!agentMemory.home) {
+        action = 'claim_home'
+        reason = 'Задача разведчика: закрепить место для будущего поселения'
+      } else if (observation.nearbyAgents.length > 0) {
+        action = 'visit_agent'
+        reason = 'Задача разведчика: встретиться с союзниками'
+      } else {
+        action = 'gather_wood'
+        reason = 'Разведчик помогает собирать ресурсы'
+      }
+    } else if (profile.role === 'builder' && logs >= 2) {
+      action = 'build_camp'
+      reason = 'Строитель получил материалы и обустраивает лагерь'
     } else {
       action = 'gather_wood'
-      reason = 'Пора перейти от разведки к сбору ресурсов'
+      reason = profile.role === 'builder'
+        ? 'Строитель собирает материалы для лагеря'
+        : 'Собиратель добывает древесину'
     }
   }
 
+  if (profile.role === 'gatherer' && logs < 8 && observation.nearbyLogs > 0) {
+    action = 'gather_wood'
+    reason = 'Рабочая задача собирателя: рядом есть древесина'
+  }
+  if (profile.role === 'builder' && logs >= 2 && action === 'gather_wood') {
+    action = 'build_camp'
+    reason = 'Есть материалы — пора обустраивать лагерь'
+  }
   return { ...decision, action, reason }
 }
-
 async function executeDecision(bot, profile, state, decision, observation) {
   const action = decision.action
   memory[profile.name].currentGoal = String(decision.goal || action).slice(0, 120)
@@ -358,14 +369,10 @@ async function executeDecision(bot, profile, state, decision, observation) {
   if (action === 'explore') {
     await explore(bot, profile)
   } else if (action === 'gather_wood') {
-    const amount = await gatherWood(bot, profile)
-    if (!amount) await explore(bot, profile)
+    await gatherWood(bot, profile)
   } else if (action === 'build_camp') {
     const built = await buildStarterCamp(bot, profile)
-    if (!built) {
-      const amount = await gatherWood(bot, profile)
-      if (!amount) await explore(bot, profile)
-    }
+    if (!built) await gatherWood(bot, profile)
   } else if (action === 'visit_agent') {
     const target = observation.nearbyAgents.find(agent => agent.name === decision.target)
       || observation.nearbyAgents.find(agent => agent.faction === profile.faction)
@@ -375,7 +382,7 @@ async function executeDecision(bot, profile, state, decision, observation) {
       await moveNear(bot, player.entity.position, 3)
       say(bot, target.name + ', я хотел обсудить наши планы.')
     } else {
-      await explore(bot, profile)
+      await gatherWood(bot, profile)
     }
   } else if (action === 'talk') {
     if (decision.message) say(bot, decision.message)
@@ -385,7 +392,7 @@ async function executeDecision(bot, profile, state, decision, observation) {
     say(bot, 'Кажется, здесь можно обустроить мой дом.')
   } else if (action === 'return_home') {
     if (memory[profile.name].home) await moveNear(bot, memory[profile.name].home, 3)
-    else await explore(bot, profile)
+    else await gatherWood(bot, profile)
   } else if (action === 'rest') {
     await wait(rand(5000, 9000))
   }
