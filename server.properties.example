@@ -1,0 +1,10 @@
+motd=4ISTIQ AI SMP
+server-port=25565
+online-mode=false
+difficulty=normal
+gamemode=survival
+max-players=30
+view-distance=8
+simulation-distance=6
+spawn-protection=0
+pvp=false
