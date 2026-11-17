@@ -19,6 +19,48 @@ let shuttingDown = false
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
+
+// Small local activity keeps an agent from looking frozen while Ollama thinks.
+// It never interrupts pathfinder navigation or an actual task.
+function startIdleActivity(bot, state, profile) {
+  if (state.idleTimer) clearInterval(state.idleTimer)
+  state.idleTimer = setInterval(async () => {
+    if (!state.started || state.bot !== bot || !bot.entity ||
+        state.performingAction || state.navigationTarget || state.idleMoving) return
+
+    const p = bot.entity.position
+    const yaw = bot.entity.yaw
+    const dx = -Math.sin(yaw)
+    const dz = -Math.cos(yaw)
+    const aheadPos = p.offset(Math.round(dx), 0, Math.round(dz))
+    const ahead = bot.blockAt(aheadPos)
+    const aboveAhead = bot.blockAt(aheadPos.offset(0, 1, 0))
+    const ground = bot.blockAt(p.offset(0, -1, 0))
+
+    // Only take a short step when the floor is solid and the space is safe.
+    if (!ground || ground.boundingBox !== 'block') {
+      bot.clearControlStates()
+      return
+    }
+    if (ahead && ahead.boundingBox === 'block' &&
+        aboveAhead && aboveAhead.boundingBox === 'empty') {
+      bot.setControlState('jump', true)
+    } else if (!ahead || ahead.boundingBox !== 'empty') {
+      bot.clearControlStates()
+      await bot.look(bot.entity.yaw + (Math.random() - 0.5) * 1.2, 0, true).catch(() => {})
+      return
+    }
+
+    state.idleMoving = true
+    bot.setControlState('forward', true)
+    if (Math.random() < 0.25) bot.setControlState('jump', true)
+    await wait(350)
+    if (state.bot === bot && !state.navigationTarget && !state.performingAction) {
+      bot.clearControlStates()
+    }
+    state.idleMoving = false
+  }, 2000)
+}
 const say = (bot, message) => {
   if (bot.entity && message) bot.chat(String(message).slice(0, 180))
 }
@@ -109,7 +151,8 @@ function makeAgent(profile, state) {
     movement.allow1by1towers = false
     bot.pathfinder.setMovements(movement)
     state.navigationReady = true
-    console.log('[ONLINE] ' + profile.name + ' spawned at ' + JSON.stringify(safePosition(bot)) + ' (pathfinder ready; parkour+jump enabled)')
+    startIdleActivity(bot, state, profile)
+    console.log('[ONLINE] ' + profile.name + ' spawned at ' + JSON.stringify(safePosition(bot)) + ' (pathfinder ready; 2s idle activity enabled)')
     if (state.started) runAgent(bot, profile, state).catch(err => console.error('[AI]', profile.name, err.message))
   })
 
@@ -140,6 +183,9 @@ function makeAgent(profile, state) {
   bot.on('kicked', reason => console.log('[KICK] ' + profile.name + ': ' + reason))
   bot.on('error', error => console.log('[ERROR] ' + profile.name + ': ' + error.message))
   bot.once('end', () => {
+    if (state.idleTimer) clearInterval(state.idleTimer)
+    state.idleTimer = null
+    bot.clearControlStates()
     console.log('[OFFLINE] ' + profile.name)
     if (state.bot !== bot) return
     state.bot = null
@@ -442,7 +488,13 @@ async function runAgent(bot, profile, state) {
         ? (memory[profile.name].actionStreak || 0) + 1 : 1
       memory[profile.name].lastAction = decision.action
       saveMemory()
-      await executeDecision(bot, profile, state, decision, observation)
+      state.performingAction = true
+      try {
+        await executeDecision(bot, profile, state, decision, observation)
+      } finally {
+        state.performingAction = false
+        if (!state.navigationTarget && state.bot === bot) bot.clearControlStates()
+      }
       if (state.bot !== bot || !bot.entity) break
       await wait(rand(3500, 6500))
     }
@@ -456,7 +508,7 @@ async function main() {
   if (!profiles.length) throw new Error('Unknown AI_BOT: ' + requestedBot + '. Use ALL or a configured bot name.')
   console.log('[BOOT] ' + profiles.length + ' selected agent(s) [' + profiles.map(p => p.name).join(', ') + '] -> ' + HOST + ':' + PORT + ' (Minecraft ' + VERSION + ')')
   for (const profile of profiles) {
-    const state = { bot: null, started: false, busy: false, retry: 0, lastChat: 0, navigationReady: false, navigationTarget: null }
+    const state = { bot: null, started: false, busy: false, retry: 0, lastChat: 0, navigationReady: false, navigationTarget: null, performingAction: false, idleMoving: false, idleTimer: null }
     agents.set(profile.name, { profile, state })
     makeAgent(profile, state)
     await wait(1200)
