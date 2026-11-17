@@ -1,26 +1,39 @@
-# 4ISTIQ — Paper 26.2 server
+# 4ISTIQ — AI SMP 26.2
 
-Clean Windows server setup for the AI SMP project.
+Windows server setup and autonomous-agent simulation prototype.
 
 ## Requirements
 - Windows 10/11
-- Java 25 or newer
-- Internet connection for first installation
+- Java 25+
+- Node.js 22+ for AI clients
+- Ollama with `qwen2.5:3b`
 
-## Install
-1. Download this repository as ZIP and extract it, or clone it with Git.
-2. Double-click INSTALL-SERVER.bat.
-3. Wait for the installer to download the latest available Paper 26.2 build.
-4. Read the Minecraft EULA in eula.txt. If you agree, change eula=false to eula=true.
-5. Double-click START-SERVER.bat.
+## Install server
+1. Run `INSTALL-SERVER.bat`.
+2. Read `eula.txt`; set `eula=true` only if you agree to the Minecraft EULA.
+3. Start Paper with `START-SERVER.bat`.
 
-The installer creates plugins/, world/, server.properties and eula.txt. The server JAR and generated worlds are intentionally not stored in Git.
+## Build and install AI plugin
+GitHub Actions builds the plugin automatically after repository changes:
+1. Open https://github.com/bs9973866-png/4istiq/actions
+2. Open the latest successful **Build AI SMP** run.
+3. Download and extract artifact `ai-smp-plugin`.
+4. Copy `ai-smp-1.0.0.jar` into the server's `plugins` folder.
+5. Restart Paper.
 
-## AI SMP
-The plugins folder is prepared for the AI SMP plugin. The plugin JAR will be added after the server baseline is verified. Ollama runs separately on the same PC; its default local API is http://127.0.0.1:11434.
+If Maven is installed locally, run `BUILD-PLUGIN.bat`; it builds and copies the JAR.
+
+## Start agents
+1. Start Paper and wait for Done.
+2. Check that AISMP appears in `/plugins`.
+3. Keep Ollama running and verify `ollama list` shows `qwen2.5:3b`.
+4. Run `agent-runtime/start.bat`.
+5. Wait for all 19 clients and the automatic 60-second countdown.
+
+Commands: `/aismp status`, `/aismp start`, `/aismp stop`.
+
+## Current prototype scope
+19 real player clients, three peaceful factions, local Ollama decisions, exploration, wood gathering, starter-camp attempts, social chat and persistent memories. This is an early prototype, not a finished human-level civilization simulator. Mineflayer/Paper 26.2 compatibility must be validated on your live server.
 
 ## Security
-This starter configuration uses online-mode=false for the offline test setup. Offline mode does not authenticate player identities. Keep the server private and do not expose it to the public internet. pvp=false is set by default.
-
-## Memory
-The start script allocates up to 4 GB to Paper, leaving memory for Windows and Ollama. Adjust -Xmx4G only if enough RAM is available.
+The server uses `online-mode=false`; offline usernames are not authenticated. Keep it private, enable whitelist, and do not expose it directly to the public internet. PvP is disabled.
