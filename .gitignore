@@ -1,0 +1,11 @@
+paper.jar
+plugins/*.jar
+logs/
+world/
+world_nether/
+world_the_end/
+cache/
+libraries/
+eula.txt
+server.properties
+*.log
