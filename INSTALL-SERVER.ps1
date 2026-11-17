@@ -6,8 +6,10 @@ Write-Host "4ISTIQ - Paper $Version installer" -ForegroundColor Cyan
 
 $java = Get-Command java -ErrorAction SilentlyContinue
 if (-not $java) { Write-Host "Java 25+ not found. Install it from https://adoptium.net/temurin/releases/" -ForegroundColor Red; Read-Host "Enter"; exit 1 }
-$javaText = (& java -version 2>&1 | Out-String)
-if ($javaText -notmatch '"(\d+)') { throw "Could not detect Java version: $javaText" }
+# java -version writes to stderr; capture it through cmd.exe so PowerShell's
+# $ErrorActionPreference = Stop does not turn the version banner into an error.
+$javaText = (cmd.exe /d /c "java -version 2>&1" | Out-String)
+if ($LASTEXITCODE -ne 0 -or $javaText -notmatch '"(\d+)') { throw "Could not detect Java version: $javaText" }
 $javaMajor = [int]$Matches[1]
 if ($javaMajor -lt 25) { Write-Host "Paper 26.2 needs Java 25+. Detected Java $javaMajor." -ForegroundColor Red; Read-Host "Enter"; exit 1 }
 Write-Host "Java $javaMajor detected." -ForegroundColor Green
