@@ -1,7 +1,31 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434'
 const MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
-let queue = Promise.resolve()
-let lastRequestAt = 0
+// Keep a small number of Ollama requests in flight. A single global promise
+// queue made all 19 agents think one after another, leaving most of them idle.
+const MAX_CONCURRENT_REQUESTS = Math.max(1, Math.min(3, Number(process.env.OLLAMA_CONCURRENCY || 2)))
+let activeRequests = 0
+const waitingRequests = []
+
+function runWithLimit(task) {
+  return new Promise((resolve, reject) => {
+    waitingRequests.push({ task, resolve, reject })
+    pumpRequests()
+  })
+}
+
+function pumpRequests() {
+  while (activeRequests < MAX_CONCURRENT_REQUESTS && waitingRequests.length) {
+    const job = waitingRequests.shift()
+    activeRequests++
+    Promise.resolve()
+      .then(job.task)
+      .then(job.resolve, job.reject)
+      .finally(() => {
+        activeRequests--
+        pumpRequests()
+      })
+  }
+}
 
 const ACTIONS = ['explore', 'gather_wood', 'build_camp', 'visit_agent', 'talk', 'claim_home', 'return_home', 'rest']
 const DECISION_SCHEMA = {
@@ -79,15 +103,8 @@ async function askForDecision(profile, memory, observation) {
 }
 
 async function generateDecision(profile, memory, observation) {
-  const task = queue.then(async () => {
-    const delay = Math.max(0, 900 - (Date.now() - lastRequestAt))
-    if (delay) await new Promise(resolve => setTimeout(resolve, delay))
-    lastRequestAt = Date.now()
-    return askForDecision(profile, memory, observation)
-  })
-  queue = task.catch(() => null)
   try {
-    return await task
+    return await runWithLimit(() => askForDecision(profile, memory, observation))
   } catch (error) {
     if (!generateDecision.warned) {
       console.log('[OLLAMA] Не удалось получить решение модели: ' + error.message)
