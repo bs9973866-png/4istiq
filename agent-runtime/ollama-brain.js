@@ -114,4 +114,35 @@ async function generateDecision(profile, memory, observation) {
   }
 }
 
-module.exports = { generateDecision }
+
+async function generateChatReply(profile, memory, username, message) {
+  const history = Array.isArray(memory.chatHistory) ? memory.chatHistory : []
+  const prompt = [
+    'Ты — персонаж Minecraft SMP по имени ' + profile.name + '. Игрок ' + username + ' обратился к тебе в игровом чате.',
+    'Отвечай естественно, по-русски, как живой участник SMP: дружелюбно, кратко и по делу.',
+    'Не утверждай, что выполнил действие в игре, если оно не было реально выполнено. Сейчас ты только отвечаешь в чате.',
+    'Характер: ' + profile.style + '. Роль: ' + profile.role + '. Цель фракции: ' + profile.factionGoal + '.',
+    'Последние события: ' + JSON.stringify((memory.recentEvents || []).slice(-6).map(item => item.event)),
+    'История разговора: ' + JSON.stringify(history.slice(-10)),
+    'Новое сообщение игрока: ' + message,
+    'Ответь одной короткой репликой, максимум 180 символов.'
+  ].join(String.fromCharCode(10))
+  const response = await fetch(OLLAMA_URL + '/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL, stream: false,
+      messages: [
+        { role: 'system', content: 'Ты общаешься с игроком от лица персонажа Minecraft. Отвечай только текстом на русском.' },
+        { role: 'user', content: prompt }
+      ],
+      options: { temperature: 0.7, num_predict: 100 }
+    }),
+    signal: AbortSignal.timeout(45000)
+  })
+  if (!response.ok) throw new Error('Ollama HTTP ' + response.status)
+  const data = await response.json()
+  return cleanText(data.message?.content || '', 180)
+}
+
+module.exports = { generateDecision, generateChatReply }
