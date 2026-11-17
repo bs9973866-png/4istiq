@@ -28,12 +28,15 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
     @Override public void onEnable() {
         saveDefaultConfig();
         Bukkit.getPluginManager().registerEvents(this, this);
-        getLogger().info("AI SMP enabled. Waiting for " + botNames().size() + " configured agents.");
+        getLogger().info("AI SMP enabled. Waiting for " + requiredAgents() + " agent(s).");
     }
 
     @Override public void onDisable() { stopCountdown(false); }
 
     private List<String> botNames() { return getConfig().getStringList("bots"); }
+    private int requiredAgents() {
+        return Math.max(1, Math.min(botNames().size(), getConfig().getInt("minimum-agents", 1)));
+    }
     private boolean isBot(Player p) { return botNames().stream().anyMatch(n -> n.equalsIgnoreCase(p.getName())); }
 
     @EventHandler public void onJoin(PlayerJoinEvent event) {
@@ -51,11 +54,11 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
             p.setInvulnerable(true);
             frozen.add(p.getUniqueId());
             announce("Подключился " + p.getName() + " (" + onlineBots() + "/" + botNames().size() + ")");
-            if (countdownTask != null && onlineBots() < botNames().size()) {
+            if (countdownTask != null && onlineBots() < requiredAgents()) {
                 stopCountdown(false);
-                announce("Ожидаем возвращения всех 19 агентов. Отсчёт будет начат заново.");
+                announce("Недостаточно агентов. Отсчёт будет начат заново.");
             }
-            if (countdownTask == null && onlineBots() >= botNames().size()) beginCountdown();
+            if (countdownTask == null && onlineBots() >= requiredAgents()) beginCountdown();
         });
     }
 
@@ -111,7 +114,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
     private void beginCountdown() {
         if (onlineBots() < botNames().size()) return;
         secondsLeft = Math.max(5, getConfig().getInt("countdown-seconds", 60));
-        announce("Все агенты на месте! До начала симуляции: " + secondsLeft + " секунд.");
+        announce("Нужное число агентов на месте! До начала симуляции: " + secondsLeft + " секунд.");
         countdownTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
             if (onlineBots() < botNames().size()) {
                 stopCountdown(false);
@@ -125,7 +128,7 @@ public final class AISMPPlugin extends JavaPlugin implements Listener {
                     frozen.remove(p.getUniqueId());
                     p.setInvulnerable(false);
                 }
-                announce("СТАРТ! 19 агентов начинают исследовать мир и основывать поселения.");
+                announce("СТАРТ! " + onlineBots() + " агент(а) начинают симуляцию.");
                 return;
             }
             if (secondsLeft <= 10 || secondsLeft % 15 == 0) announce("До старта: " + secondsLeft + "...");
