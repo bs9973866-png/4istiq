@@ -186,11 +186,12 @@ async function gatherWood(bot, profile) {
   const ids = names.map(name => bot.registry.blocksByName[name]?.id).filter(id => id !== undefined)
   if (!ids.length) return 0
   let collected = 0
-  for (let i = 0; i < 2 && bot.entity; i++) {
-    const target = bot.findBlock({ matching: ids, maxDistance: 20 })
+  for (let i = 0; i < 3 && bot.entity; i++) {
+    const target = bot.findBlock({ matching: ids, maxDistance: 32 })
     if (!target) break
     try {
-      await moveNear(bot, target.position, 2)
+      const reached = await moveNear(bot, target.position, 2)
+      if (!reached) continue
       const block = bot.blockAt(target.position)
       if (block && bot.canDigBlock(block)) {
         await bot.dig(block)
@@ -211,7 +212,8 @@ async function explore(bot, profile) {
   const origin = bot.entity.position
   const target = origin.offset(rand(-18, 18), 0, rand(-18, 18))
   try {
-    await moveNear(bot, target, 4)
+    const reached = await moveNear(bot, target, 4)
+    if (!reached) return false
     rememberPosition(profile, bot)
     memory[profile.name].stats.journeys++
     const biome = bot.blockAt(bot.entity.position)?.name || 'неизвестная местность'
@@ -305,6 +307,45 @@ function fallbackDecision(profile, observation) {
   return { action: 'explore', goal: 'изучить окрестности', reason: 'Нужно найти полезное место', message: '' }
 }
 
+function applyTaskDirector(profile, agentMemory, observation, decision) {
+  const logs = observation.inventory
+    .filter(item => item.name.endsWith('_log'))
+    .reduce((sum, item) => sum + item.count, 0)
+  const previous = agentMemory.lastAction || ''
+  const streak = previous === 'explore' ? (agentMemory.actionStreak || 0) : 0
+  let action = decision?.action || 'explore'
+  let reason = decision?.reason || ''
+
+  // Give every role a concrete job. The model may suggest exploring, but it
+  // cannot keep an agent in that loop indefinitely.
+  if (profile.role === 'gatherer' && observation.nearbyLogs > 0 && logs < 8) {
+    action = 'gather_wood'
+    reason = 'Рабочая задача собирателя: рядом есть древесина'
+  } else if (profile.role === 'builder' && logs >= 2) {
+    action = 'build_camp'
+    reason = 'Есть материалы — пора обустраивать лагерь'
+  } else if (action === 'explore' && streak >= 1) {
+    if (profile.role === 'gatherer') {
+      action = 'gather_wood'
+      reason = 'Смена повторяющегося исследования на сбор ресурсов'
+    } else if (profile.role === 'builder') {
+      action = logs >= 2 ? 'build_camp' : 'gather_wood'
+      reason = 'Смена исследования на работу строителя'
+    } else if (!agentMemory.home) {
+      action = 'claim_home'
+      reason = 'Разведчик уже осмотрел окрестности — выбирает место для дома'
+    } else if (observation.nearbyAgents.length) {
+      action = 'visit_agent'
+      reason = 'Пора встретиться с соседями и обсудить поселение'
+    } else {
+      action = 'gather_wood'
+      reason = 'Пора перейти от разведки к сбору ресурсов'
+    }
+  }
+
+  return { ...decision, action, reason }
+}
+
 async function executeDecision(bot, profile, state, decision, observation) {
   const action = decision.action
   memory[profile.name].currentGoal = String(decision.goal || action).slice(0, 120)
@@ -372,6 +413,12 @@ async function runAgent(bot, profile, state) {
         }
       }
       if (!state.started || state.bot !== bot) break
+      decision = applyTaskDirector(profile, memory[profile.name], observation, decision)
+      const previousAction = memory[profile.name].lastAction || ''
+      memory[profile.name].actionStreak = previousAction === decision.action
+        ? (memory[profile.name].actionStreak || 0) + 1 : 1
+      memory[profile.name].lastAction = decision.action
+      saveMemory()
       await executeDecision(bot, profile, state, decision, observation)
       if (state.bot !== bot || !bot.entity) break
       await wait(rand(3500, 6500))
