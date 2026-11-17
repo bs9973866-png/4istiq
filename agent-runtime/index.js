@@ -2,7 +2,11 @@ const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const fs = require('node:fs')
 const path = require('node:path')
-const profiles = require('./bots.json')
+const allProfiles = require('./bots.json')
+const requestedBot = (process.env.AI_BOT || 'ALL').trim()
+const profiles = requestedBot.toUpperCase() === 'ALL'
+  ? allProfiles
+  : allProfiles.filter(profile => profile.name.toLowerCase() === requestedBot.toLowerCase())
 const { generateDecision } = require('./ollama-brain')
 
 const HOST = process.env.MC_HOST || '127.0.0.1'
@@ -324,6 +328,15 @@ function applyTaskDirector(profile, agentMemory, observation, decision) {
   let action = decision?.action || 'explore'
   let reason = decision?.reason || ''
 
+  // In a one-agent test, prioritize using the saved inventory before gathering more.
+  if (profiles.length === 1) {
+    action = logs >= 2 ? 'build_camp' : 'gather_wood'
+    reason = logs >= 2
+      ? 'Одиночный тест: использовать накопленную древесину для лагеря'
+      : 'Одиночный тест: собрать минимум древесины для лагеря'
+    return { ...decision, action, reason }
+  }
+
   // Ollama may suggest exploring forever. Role assignments are authoritative:
   // scouts select a home once, then meet allies or help gather resources;
   // gatherers collect wood; builders gather until they have enough to build.
@@ -439,8 +452,9 @@ async function runAgent(bot, profile, state) {
 }
 
 async function main() {
-  if (profiles.length !== 19) throw new Error('bots.json must contain exactly 19 agents')
-  console.log('[BOOT] ' + profiles.length + ' agents -> ' + HOST + ':' + PORT + ' (Minecraft ' + VERSION + ')')
+  if (allProfiles.length !== 19) throw new Error('bots.json must contain exactly 19 configured agents')
+  if (!profiles.length) throw new Error('Unknown AI_BOT: ' + requestedBot + '. Use ALL or a configured bot name.')
+  console.log('[BOOT] ' + profiles.length + ' selected agent(s) [' + profiles.map(p => p.name).join(', ') + '] -> ' + HOST + ':' + PORT + ' (Minecraft ' + VERSION + ')')
   for (const profile of profiles) {
     const state = { bot: null, started: false, busy: false, retry: 0, lastChat: 0, navigationReady: false, navigationTarget: null }
     agents.set(profile.name, { profile, state })
